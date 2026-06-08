@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Rust / Tauri
+/target/
+src-tauri/target/
+src-tauri/gen/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+*.local
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Env / TS build cache
+.env
+.env.*
+*.tsbuildinfo
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Test databases (incl. WAL/SHM sidecars)
+*.db
+*.db3
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite-shm
+*.sqlite-wal

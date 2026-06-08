@@ -1,0 +1,16 @@
+# Cargo workspace root.
+#
+# `pgcore` holds all pure database + SQL-generation logic and depends only on
+# the `postgres` client (no GUI toolkit), so it can be unit-tested on any
+# machine without the WebKit/GTK system libraries that the Tauri app requires.
+# `src-tauri` is a thin Tauri command layer over `pgcore`.
+[workspace]
+resolver = "2"
+members = ["src-tauri", "crates/pgcore"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

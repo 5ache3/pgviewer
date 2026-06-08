@@ -1,0 +1,95 @@
+//! End-to-end tests against a real PostgreSQL server.
+//!
+//! These are skipped unless a server is configured via environment variables,
+//! so the suite still passes on machines without PostgreSQL:
+//!
+//! ```sh
+//! PGCORE_TEST_HOST=localhost PGCORE_TEST_USER=postgres \
+//! PGCORE_TEST_DB=postgres cargo test -p pgcore -- --nocapture
+//! ```
+
+use pgcore::pool::{self, ConnectOpts, SslMode};
+use pgcore::value::CellValue;
+use pgcore::{query, schema};
+
+/// Build connect options from the environment, or `None` to skip.
+fn opts() -> Option<ConnectOpts> {
+    let host = std::env::var("PGCORE_TEST_HOST").ok()?;
+    Some(ConnectOpts {
+        host,
+        port: std::env::var("PGCORE_TEST_PORT")
+            .ok()
+            .and_then(|p| p.parse().ok())
+            .unwrap_or(5432),
+        dbname: std::env::var("PGCORE_TEST_DB").unwrap_or_else(|_| "postgres".into()),
+        user: std::env::var("PGCORE_TEST_USER").unwrap_or_else(|_| "postgres".into()),
+        password: std::env::var("PGCORE_TEST_PASSWORD").ok(),
+        ssl_mode: SslMode::Prefer,
+    })
+}
+
+#[test]
+fn end_to_end_browse_filter_and_introspect() {
+    let Some(opts) = opts() else {
+        eprintln!("skipping: set PGCORE_TEST_HOST to run the live PostgreSQL test");
+        return;
+    };
+
+    let pool = pool::open_pool(&opts).expect("connect");
+    let mut conn = pool::get_conn(&pool).expect("checkout");
+
+    // Isolated scratch schema so we never touch the user's objects.
+    conn.batch_execute(
+        "DROP SCHEMA IF EXISTS pgcore_test CASCADE; \
+         CREATE SCHEMA pgcore_test; \
+         CREATE TABLE pgcore_test.users ( \
+             id serial PRIMARY KEY, name text, age int, country text, joined timestamptz); \
+         CREATE TABLE pgcore_test.orders ( \
+             id serial PRIMARY KEY, user_id int REFERENCES pgcore_test.users(id), total numeric(10,2)); \
+         INSERT INTO pgcore_test.users (name, age, country, joined) VALUES \
+             ('Alice', 30, 'US', now()), ('Bob', 25, 'CA', now()), ('Chen', 41, 'SG', now()); \
+         INSERT INTO pgcore_test.orders (user_id, total) VALUES (1, 9.50), (1, 4.00), (2, 7.25);",
+    )
+    .expect("seed");
+
+    // Schema discovery sees the qualified tables.
+    let tables = schema::list_tables(&mut conn).expect("tables");
+    assert!(tables.iter().any(|t| t.name == "pgcore_test.users"));
+
+    let cols = schema::table_columns(&mut conn, "pgcore_test.users").expect("columns");
+    let id = cols.iter().find(|c| c.name == "id").expect("id column");
+    assert_eq!(id.pk, 1, "id is the primary key");
+
+    let fks = schema::table_foreign_keys(&mut conn, "pgcore_test.orders").expect("fks");
+    assert_eq!(fks.len(), 1);
+    assert_eq!(fks[0].to_table, "pgcore_test.users");
+
+    // Filtered browse with a bound integer parameter.
+    let spec = serde_json::from_value(serde_json::json!({
+        "baseTable": "pgcore_test.users",
+        "columns": ["name", "age"],
+        "where": { "combinator": "AND", "children": [
+            { "column": "age", "op": "gte", "value": 30 }
+        ]},
+        "orderBy": [{ "column": "age", "dir": "ASC" }]
+    }))
+    .unwrap();
+    let (_, result) = query::run_select(&mut conn, &spec).expect("run");
+    assert_eq!(result.rows.len(), 2); // Alice (30) and Chen (41)
+    assert!(matches!(&result.rows[0][0], CellValue::Text { v } if v == "Alice"));
+
+    // Numeric column comes back as precise text.
+    let (_, totals) = query::run_select(
+        &mut conn,
+        &serde_json::from_value(serde_json::json!({
+            "baseTable": "pgcore_test.orders",
+            "columns": ["total"],
+            "orderBy": [{ "column": "total", "dir": "ASC" }]
+        }))
+        .unwrap(),
+    )
+    .expect("run totals");
+    assert!(matches!(&totals.rows[0][0], CellValue::Num { v } if v == "4.00"));
+
+    conn.batch_execute("DROP SCHEMA pgcore_test CASCADE;").ok();
+}

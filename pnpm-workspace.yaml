@@ -1,0 +1,4 @@
+# esbuild ships its binary via the @esbuild/<platform> package; its postinstall
+# is only a validation step, so it is safe to allow.
+allowBuilds:
+  esbuild: true
