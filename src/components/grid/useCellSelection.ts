@@ -123,5 +123,11 @@ export function useCellSelection(rows: CellValue[][]) {
     ? (rect.maxRow - rect.minRow + 1) * (rect.maxCol - rect.minCol + 1)
     : 0;
 
-  return { isSelected, onCellMouseDown, onCellMouseEnter, clear, cellCount };
+  // The contiguous range of rows the selection touches (for row-level actions
+  // like delete). Indices are into the current page's `rows`, ascending.
+  const selectedRows = rect
+    ? Array.from({ length: rect.maxRow - rect.minRow + 1 }, (_, i) => rect.minRow + i)
+    : [];
+
+  return { isSelected, onCellMouseDown, onCellMouseEnter, clear, cellCount, selectedRows };
 }

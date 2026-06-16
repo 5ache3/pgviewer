@@ -27,11 +27,12 @@ const ROW_HEIGHT = 30;
 export function DataGrid() {
   const columnsMeta = useTableViewStore((s) => s.columns);
   const rows = useTableViewStore((s) => s.rows);
-  const sort = useTableViewStore((s) => s.sort);
+  const sorts = useTableViewStore((s) => s.sorts);
   const toggleSort = useTableViewStore((s) => s.toggleSort);
   const activeTable = useTableViewStore((s) => s.activeTable);
   const joins = useTableViewStore((s) => s.joins);
   const editCell = useTableViewStore((s) => s.editCell);
+  const deleteRows = useTableViewStore((s) => s.deleteRows);
   const ensureColumns = useSchemaStore((s) => s.ensureColumns);
 
   // Cells are editable only for a single-table view with a primary key.
@@ -89,6 +90,44 @@ export function DataGrid() {
 
   const selection = useCellSelection(rows);
 
+  // Rows can be deleted under the same conditions cells can be edited
+  // (single-table view with a primary key). The store re-checks and reports any
+  // edge cases (grouped/aggregated views).
+  const deletable = editable;
+  const selectedRows = selection.selectedRows;
+
+  function deleteSelectedRows() {
+    if (!deletable || selectedRows.length === 0) return;
+    const n = selectedRows.length;
+    const ok = window.confirm(
+      `Delete ${n} ${n === 1 ? "row" : "rows"} from "${activeTable}"? This cannot be undone.`,
+    );
+    if (!ok) return;
+    void deleteRows(selectedRows);
+    selection.clear();
+  }
+
+  // Delete/Backspace removes the selected rows (when not editing a cell or typing
+  // in a form control).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      if (editing || !deletable || selectedRows.length === 0) return;
+      const el = document.activeElement;
+      if (
+        el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLSelectElement
+      )
+        return;
+      e.preventDefault();
+      deleteSelectedRows();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+    // deleteSelectedRows closes over current selection/state; re-bind each render.
+  });
+
   const parentRef = useRef<HTMLDivElement>(null);
   const tableRows = table.getRowModel().rows;
   const virtualizer = useVirtualizer({
@@ -109,18 +148,16 @@ export function DataGrid() {
   }
 
   return (
-    <div ref={parentRef} className="relative h-full overflow-auto bg-bg">
-      {selection.cellCount > 0 && (
-        <div className="pointer-events-none sticky bottom-2 left-0 z-20 ml-2 inline-block rounded border border-border bg-surface-2/95 px-2 py-0.5 text-2xs text-muted shadow">
-          {selection.cellCount} {selection.cellCount === 1 ? "cell" : "cells"} · ⌘/Ctrl+C to copy
-        </div>
-      )}
-      <div style={{ width: totalWidth }} className="relative">
+    <div className="relative h-full">
+      <div ref={parentRef} className="h-full overflow-auto bg-bg">
+        <div style={{ width: totalWidth }} className="relative">
         {/* Header */}
         <div className="sticky top-0 z-10 flex border-b border-border bg-surface-2">
           {table.getHeaderGroups()[0]?.headers.map((header) => {
-            const active = sort?.column === header.column.id.split(":").slice(1).join(":");
             const name = header.column.columnDef.header as string;
+            const sortIndex = sorts.findIndex((s) => s.column === name);
+            const active = sortIndex >= 0;
+            const rule = active ? sorts[sortIndex] : null;
             return (
               <div
                 key={header.id}
@@ -128,12 +165,19 @@ export function DataGrid() {
                 className="group relative flex items-center"
               >
                 <button
-                  onClick={() => void toggleSort(name)}
+                  onClick={(e) => void toggleSort(name, e.shiftKey)}
                   className="flex w-full items-center gap-1 truncate px-2 py-1.5 text-left text-2xs font-semibold uppercase tracking-wide text-muted hover:text-fg"
-                  title={name}
+                  title={`${name}\nClick to sort · Shift-click to add a sort`}
                 >
                   <span className="truncate">{name}</span>
-                  {active && <span className="text-accent">{sort?.dir === "ASC" ? "▲" : "▼"}</span>}
+                  {active && (
+                    <span className="flex items-center text-accent">
+                      {rule?.dir === "ASC" ? "▲" : "▼"}
+                      {sorts.length > 1 && (
+                        <span className="ml-0.5 tabular-nums text-2xs">{sortIndex + 1}</span>
+                      )}
+                    </span>
+                  )}
                 </button>
                 <div
                   onMouseDown={header.getResizeHandler()}
@@ -219,7 +263,26 @@ export function DataGrid() {
             );
           })}
         </div>
+        </div>
       </div>
+
+      {/* Selection hint — an overlay so showing/hiding it never shifts the grid. */}
+      {selection.cellCount > 0 && (
+        <div className="absolute bottom-2 left-2 z-20 flex items-center gap-2">
+          <div className="pointer-events-none rounded border border-border bg-surface-2/95 px-2 py-0.5 text-2xs text-muted shadow">
+            {selection.cellCount} {selection.cellCount === 1 ? "cell" : "cells"} · ⌘/Ctrl+C to copy
+          </div>
+          {deletable && (
+            <button
+              onClick={deleteSelectedRows}
+              title="Delete the selected row(s) (Del)"
+              className="rounded border border-red-500/40 bg-surface-2/95 px-2 py-0.5 text-2xs font-medium text-red-400 shadow hover:bg-red-500/15 hover:text-red-300"
+            >
+              Delete {selectedRows.length} {selectedRows.length === 1 ? "row" : "rows"}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

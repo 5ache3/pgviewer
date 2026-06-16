@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { useUiStore } from "@/stores/uiStore";
+import { FOCUS_FILTER_EVENT, FOCUS_SQL_EVENT, emit } from "@/lib/events";
 
 import { useOpenDatabase } from "./useOpenDatabase";
 
@@ -9,14 +10,15 @@ import { useOpenDatabase } from "./useOpenDatabase";
  *   Cmd/Ctrl + O — open database
  *   Cmd/Ctrl + B — toggle the left sidebar
  *   Cmd/Ctrl + J — toggle the SQL panel
- *
- * More shortcuts (search, focus SQL, run query, palette) are added in later
- * phases as the corresponding features land.
+ *   Cmd/Ctrl + K — command palette
+ *   Cmd/Ctrl + L — focus the SQL editor
+ *   Cmd/Ctrl + F — focus the filter builder
  */
 export function useKeyboardShortcuts() {
   const openDatabase = useOpenDatabase();
   const toggleLeftSidebar = useUiStore((s) => s.toggleLeftSidebar);
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
+  const toggleCommandPalette = useUiStore((s) => s.toggleCommandPalette);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -35,9 +37,26 @@ export function useKeyboardShortcuts() {
           e.preventDefault();
           toggleRightPanel();
           break;
+        case "k":
+          e.preventDefault();
+          toggleCommandPalette();
+          break;
+        case "l": {
+          // Focus the SQL editor (revealing the panel first if it's hidden).
+          e.preventDefault();
+          const wasHidden = !useUiStore.getState().rightPanelVisible;
+          if (wasHidden) toggleRightPanel();
+          // Defer so a just-revealed (lazily loaded) editor mounts its listener.
+          setTimeout(() => emit(FOCUS_SQL_EVENT), wasHidden ? 150 : 0);
+          break;
+        }
+        case "f":
+          e.preventDefault();
+          emit(FOCUS_FILTER_EVENT);
+          break;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [openDatabase, toggleLeftSidebar, toggleRightPanel]);
+  }, [openDatabase, toggleLeftSidebar, toggleRightPanel, toggleCommandPalette]);
 }

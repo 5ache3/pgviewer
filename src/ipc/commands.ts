@@ -19,6 +19,7 @@ import type {
   HistoryEntry,
   IndexMeta,
   JoinSuggestion,
+  QueryResult,
   QuerySpec,
   RowCount,
   SavedQuery,
@@ -120,6 +121,11 @@ export function runQuery(spec: QuerySpec): Promise<BrowseResponse> {
   return invoke<BrowseResponse>("run_query", { spec });
 }
 
+/** Execute an arbitrary, user-edited SQL string and return the result. */
+export function runRawSql(sql: string): Promise<QueryResult> {
+  return invoke<QueryResult>("run_raw_sql", { sql });
+}
+
 // --- Mutations (edit cell, add/drop column) --------------------------------
 
 /** A primary-key predicate identifying the row to update. */
@@ -136,6 +142,14 @@ export function updateCell(args: {
   pk: PkPredicate[];
 }): Promise<number> {
   return invoke<number>("update_cell", { ...args });
+}
+
+/** Delete one row, keyed on its primary key. Returns rows affected. */
+export function deleteRow(args: {
+  table: string;
+  pk: PkPredicate[];
+}): Promise<number> {
+  return invoke<number>("delete_row", { ...args });
 }
 
 export function addColumn(args: {

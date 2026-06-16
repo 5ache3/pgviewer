@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, type MouseEvent as ReactMouseEvent } from "react";
 
 import { useConnectionStore } from "@/stores/connectionStore";
 import { useSchemaStore } from "@/stores/schemaStore";
@@ -14,7 +14,9 @@ import { DataGrid } from "@/components/grid/DataGrid";
 import { GridToolbar } from "@/components/grid/GridToolbar";
 import { FilterBuilder } from "@/components/filters/FilterBuilder";
 import { JoinBuilder } from "@/components/joins/JoinBuilder";
+import { AggregateBuilder } from "@/components/aggregate/AggregateBuilder";
 import { ConnectionDialog } from "@/components/connection/ConnectionDialog";
+import { CommandPalette } from "@/components/palette/CommandPalette";
 
 import { StatusBar } from "./StatusBar";
 
@@ -35,10 +37,16 @@ export function AppShell() {
   const resetTableView = useTableViewStore((s) => s.reset);
   const refreshHistory = useHistoryStore((s) => s.refresh);
 
+  const theme = useUiStore((s) => s.theme);
+  const toggleTheme = useUiStore((s) => s.toggleTheme);
   const leftVisible = useUiStore((s) => s.leftSidebarVisible);
   const rightVisible = useUiStore((s) => s.rightPanelVisible);
+  const leftWidth = useUiStore((s) => s.leftSidebarWidth);
+  const rightWidth = useUiStore((s) => s.rightPanelWidth);
   const toggleLeft = useUiStore((s) => s.toggleLeftSidebar);
   const toggleRight = useUiStore((s) => s.toggleRightPanel);
+  const setLeftWidth = useUiStore((s) => s.setLeftSidebarWidth);
+  const setRightWidth = useUiStore((s) => s.setRightPanelWidth);
   const isOpen = status === "open";
 
   // Load schema when a database opens; reset everything when it closes.
@@ -70,6 +78,7 @@ export function AppShell() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <ThemeToggle theme={theme} onClick={toggleTheme} />
           <Button onClick={() => openDatabase()}>{isOpen ? "Connect…" : "Connect"}</Button>
           {isOpen && (
             <PanelToggle
@@ -86,11 +95,12 @@ export function AppShell() {
         {isOpen ? (
           <>
             {leftVisible && (
-              <div className="flex w-64 shrink-0 flex-col">
+              <div className="relative flex shrink-0 flex-col" style={{ width: leftWidth }}>
                 <div className="min-h-0 flex-1 overflow-hidden">
                   <Sidebar />
                 </div>
                 <ColumnsPanel />
+                <ResizeHandle edge="right" onResize={(x) => setLeftWidth(x)} />
               </div>
             )}
 
@@ -98,13 +108,18 @@ export function AppShell() {
               <GridToolbar />
               <JoinBuilder />
               <FilterBuilder />
+              <AggregateBuilder />
               <div className="min-h-0 flex-1">
                 <DataGrid />
               </div>
             </section>
 
             {rightVisible && (
-              <div className="w-[420px] shrink-0">
+              <div className="relative shrink-0" style={{ width: rightWidth }}>
+                <ResizeHandle
+                  edge="left"
+                  onResize={(x) => setRightWidth(window.innerWidth - x)}
+                />
                 <Suspense
                   fallback={
                     <div className="flex h-full items-center justify-center text-xs text-muted">
@@ -124,7 +139,48 @@ export function AppShell() {
 
       <StatusBar />
       <ConnectionDialog />
+      <CommandPalette />
     </div>
+  );
+}
+
+/**
+ * A thin draggable strip on a panel's edge. Reports the pointer's X position
+ * during the drag; the parent converts that into a width (and the store snaps
+ * the panel hidden when it gets too small).
+ */
+function ResizeHandle({
+  edge,
+  onResize,
+}: {
+  edge: "left" | "right";
+  onResize: (clientX: number) => void;
+}) {
+  const onMouseDown = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const move = (ev: MouseEvent) => onResize(ev.clientX);
+    const up = () => {
+      window.removeEventListener("mousemove", move);
+      window.removeEventListener("mouseup", up);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", move);
+    window.addEventListener("mouseup", up);
+  };
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      title="Drag to resize · drag to the edge to hide"
+      className={cn(
+        "absolute top-0 z-30 h-full w-1.5 cursor-col-resize select-none",
+        "transition-colors hover:bg-accent/60",
+        edge === "right" ? "-right-0.5" : "-left-0.5",
+      )}
+    />
   );
 }
 
@@ -170,6 +226,46 @@ function PanelToggle({
           stroke="currentColor"
         />
       </svg>
+    </button>
+  );
+}
+
+/** Toggles between the dark and light palettes, showing the icon for the
+ * theme you'd switch to. */
+function ThemeToggle({ theme, onClick }: { theme: "dark" | "light"; onClick: () => void }) {
+  const isDark = theme === "dark";
+  return (
+    <button
+      onClick={onClick}
+      title={`Switch to ${isDark ? "light" : "dark"} mode`}
+      aria-label={`Switch to ${isDark ? "light" : "dark"} mode`}
+      className={cn(
+        "flex h-7 w-7 items-center justify-center rounded border border-border text-muted",
+        "hover:bg-surface-2 hover:text-fg",
+      )}
+    >
+      {isDark ? (
+        // Sun: switch to light.
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="1.8" />
+          <path
+            d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+          />
+        </svg>
+      ) : (
+        // Moon: switch to dark.
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinejoin="round"
+          />
+        </svg>
+      )}
     </button>
   );
 }

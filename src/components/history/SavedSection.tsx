@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { useHistoryStore } from "@/stores/historyStore";
 import { useTableViewStore } from "@/stores/tableViewStore";
+import { runSqlWithConfirm } from "@/lib/sql";
 
 /** Collapsible "Saved" section: name and store the current SQL, list, copy, delete. */
 export function SavedSection() {
@@ -54,8 +55,8 @@ export function SavedSection() {
           {saved.map((q) => (
             <div key={q.id} className="flex items-center gap-2 px-3 py-0.5 text-xs">
               <button
-                onClick={() => void navigator.clipboard.writeText(q.sql)}
-                title={q.sql}
+                onClick={() => void runSqlWithConfirm(q.sql)}
+                title={`Run:\n${q.sql}`}
                 className="truncate text-left hover:text-accent"
               >
                 {q.name}

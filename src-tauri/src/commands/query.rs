@@ -65,3 +65,13 @@ pub fn run_query(spec: QuerySpec, state: State<'_, AppState>) -> AppResult<Brows
     let (sql, result) = query::run_select(&mut conn, &spec)?;
     Ok(BrowseResponse { sql, result })
 }
+
+/// Execute an arbitrary, user-edited SQL string and return the result. Powers the
+/// "edit and run SQL" flow in the SQL panel. Runs the SQL verbatim, so the
+/// frontend is responsible for confirming destructive statements first.
+#[tauri::command]
+pub fn run_raw_sql(sql: String, state: State<'_, AppState>) -> AppResult<QueryResult> {
+    let mut conn = state.conn()?;
+    let result = query::run_raw(&mut conn, &sql)?;
+    Ok(result)
+}

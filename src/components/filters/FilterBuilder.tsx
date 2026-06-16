@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useSchemaStore } from "@/stores/schemaStore";
 import { useTableViewStore } from "@/stores/tableViewStore";
 import { useFilterStore, toFilterGroup } from "@/stores/filterStore";
+import { FOCUS_FILTER_EVENT } from "@/lib/events";
 
 import { FilterGroupView } from "./FilterGroupView";
 
@@ -28,6 +29,17 @@ export function FilterBuilder() {
   useEffect(() => {
     if (activeTable) resetFilters();
   }, [activeTable, resetFilters]);
+
+  // ⌘/Ctrl+F: reveal the filter panel and start a condition if none exist.
+  useEffect(() => {
+    const focus = () => {
+      setOpen(true);
+      const { root: tree, addCondition: add } = useFilterStore.getState();
+      if (tree.children.length === 0) add(tree.id);
+    };
+    window.addEventListener(FOCUS_FILTER_EVENT, focus);
+    return () => window.removeEventListener(FOCUS_FILTER_EVENT, focus);
+  }, []);
 
   // Populate column options for the base table plus any joined tables. With
   // joins, columns are qualified (`table.column`) to avoid ambiguity.

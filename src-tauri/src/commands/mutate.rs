@@ -22,6 +22,18 @@ pub fn update_cell(
     Ok(mutate::update_cell(&mut conn, &table, &column, &value, &pk)?)
 }
 
+/// Delete a single row, identifying it by its primary key. Destructive — the
+/// frontend confirms with the user first. Returns rows affected (0 if gone).
+#[tauri::command]
+pub fn delete_row(
+    table: String,
+    pk: Vec<PkPredicate>,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    let mut conn = state.conn()?;
+    Ok(mutate::delete_row(&mut conn, &table, &pk)?)
+}
+
 #[tauri::command]
 pub fn add_column(
     table: String,

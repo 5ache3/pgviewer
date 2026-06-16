@@ -1,8 +1,9 @@
 import { useState } from "react";
 
 import { useHistoryStore } from "@/stores/historyStore";
+import { runSqlWithConfirm } from "@/lib/sql";
 
-/** Collapsible "History" section for the sidebar. Click an entry to copy its SQL. */
+/** Collapsible "History" section for the sidebar. Click an entry to re-run its SQL. */
 export function HistorySection() {
   const history = useHistoryStore((s) => s.history);
   const clear = useHistoryStore((s) => s.clearHistory);
@@ -36,19 +37,33 @@ export function HistorySection() {
             <p className="px-3 py-1 text-2xs text-muted">No queries yet.</p>
           ) : (
             history.map((entry) => (
-              <button
-                key={entry.id}
-                onClick={() => void navigator.clipboard.writeText(entry.sql)}
-                title="Click to copy SQL"
-                className="flex w-full flex-col gap-0.5 px-3 py-1 text-left hover:bg-surface-2"
-              >
-                <span className="truncate font-mono text-2xs text-fg/80">
-                  {entry.sql.replace(/\s+/g, " ")}
-                </span>
-                <span className="text-2xs text-muted">
-                  {new Date(entry.timestamp).toLocaleTimeString()} · {entry.elapsedMs.toFixed(1)} ms
-                </span>
-              </button>
+              <div key={entry.id} className="group flex items-center hover:bg-surface-2">
+                <button
+                  onClick={() => void runSqlWithConfirm(entry.sql)}
+                  title="Click to run · ⇧ to copy"
+                  onClickCapture={(e) => {
+                    if (e.shiftKey) {
+                      e.preventDefault();
+                      void navigator.clipboard.writeText(entry.sql);
+                    }
+                  }}
+                  className="flex min-w-0 flex-1 flex-col gap-0.5 px-3 py-1 text-left"
+                >
+                  <span className="truncate font-mono text-2xs text-fg/80">
+                    {entry.sql.replace(/\s+/g, " ")}
+                  </span>
+                  <span className="text-2xs text-muted">
+                    {new Date(entry.timestamp).toLocaleTimeString()} · {entry.elapsedMs.toFixed(1)} ms
+                  </span>
+                </button>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(entry.sql)}
+                  title="Copy SQL"
+                  className="mr-1.5 hidden h-5 w-5 shrink-0 rounded border border-border text-2xs text-muted group-hover:block hover:bg-surface hover:text-fg"
+                >
+                  ⧉
+                </button>
+              </div>
             ))
           )}
         </div>

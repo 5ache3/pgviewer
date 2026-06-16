@@ -68,6 +68,40 @@ pub fn update_cell(
     Ok(conn.execute(sql.as_str(), &bound)?)
 }
 
+/// Build a parameterized `DELETE` matching the row identified by the
+/// primary-key predicates. `$1..` are the PK values.
+fn build_delete_sql(table: &str, pk_columns: &[&str]) -> String {
+    let where_clause = pk_columns
+        .iter()
+        .enumerate()
+        .map(|(i, col)| format!("{} = ${}", ident::quote(col), i + 1))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    format!(
+        "DELETE FROM {} WHERE {}",
+        ident::quote_qualified(table),
+        where_clause
+    )
+}
+
+/// Delete the single row identified by `pk`. Destructive — callers must confirm
+/// with the user. Returns the number of rows affected (0 means nothing matched).
+pub fn delete_row(conn: &mut Client, table: &str, pk: &[PkPredicate]) -> Result<u64> {
+    if pk.is_empty() {
+        return Err(Error::Msg(
+            "cannot delete: this table has no primary key to identify the row".into(),
+        ));
+    }
+
+    let pk_columns: Vec<&str> = pk.iter().map(|p| p.column.as_str()).collect();
+    let sql = build_delete_sql(table, &pk_columns);
+
+    let params: Vec<BoundValue> = pk.iter().map(|p| BoundValue::from_json(&p.value)).collect();
+    let bound: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+
+    Ok(conn.execute(sql.as_str(), &bound)?)
+}
+
 /// Add a column to a table. `data_type` is validated against an allow-list
 /// before interpolation since a type name cannot be parameterized or quoted.
 pub fn add_column(
@@ -134,6 +168,21 @@ mod tests {
         assert_eq!(
             sql,
             "UPDATE \"orders\" SET \"total\" = $1 WHERE \"order_id\" = $2 AND \"line\" = $3"
+        );
+    }
+
+    #[test]
+    fn delete_sql_quotes_and_numbers_placeholders() {
+        let sql = build_delete_sql("public.users", &["id"]);
+        assert_eq!(sql, "DELETE FROM \"public\".\"users\" WHERE \"id\" = $1");
+    }
+
+    #[test]
+    fn delete_sql_supports_composite_keys() {
+        let sql = build_delete_sql("orders", &["order_id", "line"]);
+        assert_eq!(
+            sql,
+            "DELETE FROM \"orders\" WHERE \"order_id\" = $1 AND \"line\" = $2"
         );
     }
 

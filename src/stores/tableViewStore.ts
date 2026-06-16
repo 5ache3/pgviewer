@@ -3,6 +3,7 @@ import { create } from "zustand";
 import * as api from "@/ipc/commands";
 import {
   errorMessage,
+  type Aggregate,
   type CellValue,
   type FilterGroup,
   type Join,
@@ -27,9 +28,16 @@ interface TableViewState {
   activeTable: string | null;
   pageSize: number;
   offset: number;
-  sort: SortState | null;
+  /** Ordered list of sort columns (multi-column sort). */
+  sorts: SortState[];
   filter: FilterGroup | null;
   joins: Join[];
+  /** SELECT DISTINCT. */
+  distinct: boolean;
+  /** GROUP BY columns. */
+  groupBy: string[];
+  /** Aggregate expressions (COUNT/SUM/AVG/MIN/MAX). */
+  aggregates: Aggregate[];
 
   // Last loaded page.
   sql: string;
@@ -38,15 +46,27 @@ interface TableViewState {
   elapsedMs: number;
   loading: boolean;
   error: string | null;
+  /**
+   * Transient message from the last raw-SQL run (e.g. "12 rows affected" for a
+   * statement that returns no result set). Cleared whenever a new query runs.
+   */
+  notice: string | null;
 
   selectTable: (table: string) => Promise<void>;
   nextPage: () => Promise<void>;
   prevPage: () => Promise<void>;
-  toggleSort: (column: string) => Promise<void>;
+  /** Toggle sort on a column. `additive` (shift-click) keeps existing sorts. */
+  toggleSort: (column: string, additive?: boolean) => Promise<void>;
   applyFilter: (filter: FilterGroup | null) => Promise<void>;
   addJoin: (join: Join) => Promise<void>;
   removeJoin: (index: number) => Promise<void>;
   setJoinKind: (index: number, kind: JoinKind) => Promise<void>;
+  /** Replace the grouping/aggregation state and rerun the query. */
+  setGrouping: (grouping: {
+    distinct: boolean;
+    groupBy: string[];
+    aggregates: Aggregate[];
+  }) => Promise<void>;
   /** The current query spec (for export), or null if no table is active. */
   getSpec: () => QuerySpec | null;
   /**
@@ -57,8 +77,21 @@ interface TableViewState {
   editCell: (rowIndex: number, colIndex: number, raw: string) => Promise<void>;
   /** Whether cells can be edited in the current view (single table + PK). */
   canEdit: () => boolean;
+  /**
+   * Delete one or more rows by their primary keys, then refresh the page. PKs are
+   * captured up front so row indices don't shift mid-delete. No-ops (with an
+   * error) when the view isn't a single table with a primary key. Destructive —
+   * callers must confirm with the user first.
+   */
+  deleteRows: (rowIndexes: number[]) => Promise<void>;
   /** Re-run the current query (e.g. after a schema change). */
   reload: () => Promise<void>;
+  /**
+   * Execute an arbitrary, user-edited SQL string and show its result in the grid.
+   * Used by the editable SQL panel. Schema-changing statements (the caller
+   * passes `refreshSchema: true`) reload the sidebar afterwards.
+   */
+  runSql: (sql: string, opts?: { refreshSchema?: boolean }) => Promise<void>;
   reset: () => void;
 }
 
@@ -68,21 +101,30 @@ const blankPage = {
   rows: [] as CellValue[][],
   elapsedMs: 0,
   error: null as string | null,
+  notice: null as string | null,
+};
+
+/** Per-table query state, reset whenever the active table changes. */
+const blankView = {
+  offset: 0,
+  sorts: [] as SortState[],
+  filter: null as FilterGroup | null,
+  joins: [] as Join[],
+  distinct: false,
+  groupBy: [] as string[],
+  aggregates: [] as Aggregate[],
 };
 
 export const useTableViewStore = create<TableViewState>((set, get) => ({
   activeTable: null,
   pageSize: DEFAULT_PAGE_SIZE,
-  offset: 0,
-  sort: null,
-  filter: null,
-  joins: [],
+  ...blankView,
   ...blankPage,
   loading: false,
 
   selectTable: async (table) => {
     if (get().activeTable === table) return;
-    set({ activeTable: table, offset: 0, sort: null, filter: null, joins: [], ...blankPage });
+    set({ activeTable: table, ...blankView, ...blankPage });
     await load(get, set);
   },
 
@@ -101,11 +143,23 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
     await load(get, set);
   },
 
-  toggleSort: async (column) => {
-    const { sort } = get();
-    const dir: "ASC" | "DESC" =
-      sort?.column === column && sort.dir === "ASC" ? "DESC" : "ASC";
-    set({ sort: { column, dir }, offset: 0 });
+  toggleSort: async (column, additive = false) => {
+    const { sorts } = get();
+    const existing = sorts.find((s) => s.column === column);
+    let next: SortState[];
+    if (additive) {
+      // Shift-click: append the column, then cycle ASC → DESC → removed.
+      if (!existing) next = [...sorts, { column, dir: "ASC" }];
+      else if (existing.dir === "ASC")
+        next = sorts.map((s) => (s.column === column ? { column, dir: "DESC" } : s));
+      else next = sorts.filter((s) => s.column !== column);
+    } else {
+      // Plain click: sort by this column alone, toggling direction.
+      const dir: "ASC" | "DESC" =
+        existing && sorts.length === 1 && existing.dir === "ASC" ? "DESC" : "ASC";
+      next = [{ column, dir }];
+    }
+    set({ sorts: next, offset: 0 });
     await load(get, set);
   },
 
@@ -131,6 +185,11 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
     await load(get, set);
   },
 
+  setGrouping: async ({ distinct, groupBy, aggregates }) => {
+    set({ distinct, groupBy, aggregates, offset: 0 });
+    await load(get, set);
+  },
+
   getSpec: () => {
     const s = get();
     return s.activeTable ? currentSpec(s) : null;
@@ -139,6 +198,7 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
   canEdit: () => {
     const s = get();
     if (!s.activeTable || s.joins.length > 0) return false;
+    if (s.groupBy.length > 0 || s.aggregates.length > 0 || s.distinct) return false;
     const meta = useSchemaStore.getState().columns[s.activeTable];
     return !!meta && meta.some((c) => c.pk > 0);
   },
@@ -149,6 +209,10 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
     if (!table) return;
     if (state.joins.length > 0) {
       set({ error: "Editing is disabled while a join is active." });
+      return;
+    }
+    if (state.groupBy.length > 0 || state.aggregates.length > 0 || state.distinct) {
+      set({ error: "Editing is disabled for grouped/aggregated results." });
       return;
     }
     const col = state.columns[colIndex];
@@ -182,12 +246,98 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
     }
   },
 
+  deleteRows: async (rowIndexes) => {
+    const state = get();
+    const table = state.activeTable;
+    if (!table || rowIndexes.length === 0) return;
+    if (state.joins.length > 0) {
+      set({ error: "Deleting is disabled while a join is active." });
+      return;
+    }
+    if (state.groupBy.length > 0 || state.aggregates.length > 0 || state.distinct) {
+      set({ error: "Deleting is disabled for grouped/aggregated results." });
+      return;
+    }
+
+    // Identify rows by their primary key.
+    const meta = await useSchemaStore
+      .getState()
+      .ensureColumns(table)
+      .catch(() => []);
+    const pkCols = meta.filter((c) => c.pk > 0).sort((a, b) => a.pk - b.pk);
+    if (pkCols.length === 0) {
+      set({ error: "Cannot delete: this table has no primary key." });
+      return;
+    }
+    const indexByName = new Map(state.columns.map((c, i) => [c.name, i]));
+    // Capture every row's PK before issuing any delete, so reloading the page
+    // can't shift the indices out from under us.
+    const pks = rowIndexes
+      .map((rowIndex) => state.rows[rowIndex])
+      .filter((row): row is CellValue[] => row != null)
+      .map((row) =>
+        pkCols.map((pc) => {
+          const idx = indexByName.get(pc.name);
+          return { column: pc.name, value: idx === undefined ? null : cellToJson(row[idx]) };
+        }),
+      );
+
+    try {
+      for (const pk of pks) {
+        await api.deleteRow({ table, pk });
+      }
+      await load(get, set);
+    } catch (e) {
+      set({ error: errorMessage(e) });
+    }
+  },
+
   reload: async () => {
     await load(get, set);
   },
 
-  reset: () =>
-    set({ activeTable: null, offset: 0, sort: null, filter: null, joins: [], ...blankPage }),
+  runSql: async (sql, opts) => {
+    const trimmed = sql.trim();
+    if (!trimmed) return;
+
+    set({ loading: true, error: null, notice: null });
+    const started = performance.now();
+    try {
+      const result = await api.runRawSql(trimmed);
+      // A command with no result set (INSERT/UPDATE/DELETE/DDL) reports affected
+      // rows instead of columns; surface that as a notice and keep the old grid.
+      const isCommand = result.columns.length === 0 && result.rowsAffected !== null;
+      set({
+        sql: trimmed,
+        loading: false,
+        elapsedMs: result.elapsedMs,
+        notice: isCommand ? `${result.rowsAffected} row(s) affected` : null,
+        ...(isCommand
+          ? {}
+          : { columns: result.columns, rows: result.rows }),
+      });
+
+      const rowCount = isCommand ? result.rowsAffected : result.rows.length;
+      void api
+        .addHistory({
+          sql: trimmed,
+          table: get().activeTable,
+          rowCount,
+          elapsedMs: result.elapsedMs,
+        })
+        .then(() => useHistoryStore.getState().refresh())
+        .catch(() => undefined);
+
+      // DDL/DML may have changed the schema (new table, dropped column, …).
+      if (opts?.refreshSchema) {
+        void useSchemaStore.getState().loadSchema();
+      }
+    } catch (e) {
+      set({ loading: false, elapsedMs: performance.now() - started, error: errorMessage(e) });
+    }
+  },
+
+  reset: () => set({ activeTable: null, ...blankView, ...blankPage }),
 }));
 
 type Get = () => TableViewState;
@@ -195,11 +345,21 @@ type Set = (partial: Partial<TableViewState>) => void;
 
 /** Build the current `QuerySpec` from the view state. */
 function currentSpec(state: TableViewState): QuerySpec {
+  const grouped = state.groupBy.length > 0;
   return {
     baseTable: state.activeTable as string,
+    distinct: state.distinct || undefined,
+    // When grouping, the raw select list is the GROUP BY columns; aggregates are
+    // appended by the builder. Without grouping we leave columns unset (SELECT *).
+    columns: grouped ? state.groupBy : undefined,
+    // Drop blank aliases so the builder emits a bare expression, not `AS ""`.
+    aggregates: state.aggregates.length
+      ? state.aggregates.map((a) => ({ ...a, alias: a.alias?.trim() ? a.alias.trim() : undefined }))
+      : undefined,
     joins: state.joins.length ? state.joins : undefined,
     where: state.filter ?? undefined,
-    orderBy: state.sort ? [{ column: state.sort.column, dir: state.sort.dir }] : undefined,
+    groupBy: grouped ? state.groupBy : undefined,
+    orderBy: state.sorts.length ? state.sorts : undefined,
     limit: state.pageSize,
     offset: state.offset,
   };

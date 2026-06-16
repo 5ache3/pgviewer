@@ -59,20 +59,38 @@ impl SortDir {
     }
 }
 
+/// Map a prepared statement's columns to serializable [`ResultColumn`]s.
+fn result_columns(stmt: &postgres::Statement) -> Vec<ResultColumn> {
+    stmt.columns()
+        .iter()
+        .map(|c| ResultColumn {
+            name: c.name().to_string(),
+            data_type: Some(c.type_().name().to_string()),
+        })
+        .collect()
+}
+
+/// Collect a fetched row set into tagged [`CellValue`]s.
+fn collect_rows(rows: &[postgres::Row], col_count: usize) -> Result<Vec<Vec<CellValue>>> {
+    let mut rows_out: Vec<Vec<CellValue>> = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut record = Vec::with_capacity(col_count);
+        for i in 0..col_count {
+            let cell: Cell = row.try_get(i)?;
+            record.push(cell.0);
+        }
+        rows_out.push(record);
+    }
+    Ok(rows_out)
+}
+
 /// Execute a built query and collect the (already-paginated) result set.
 fn run_built(conn: &mut Client, built: &BuiltQuery) -> Result<QueryResult> {
     let start = Instant::now();
 
     // Prepare first so column metadata is available even for an empty result.
     let stmt = conn.prepare(&built.sql)?;
-    let columns: Vec<ResultColumn> = stmt
-        .columns()
-        .iter()
-        .map(|c| ResultColumn {
-            name: c.name().to_string(),
-            data_type: Some(c.type_().name().to_string()),
-        })
-        .collect();
+    let columns = result_columns(&stmt);
     let col_count = columns.len();
 
     let params: Vec<&(dyn ToSql + Sync)> = built
@@ -82,19 +100,48 @@ fn run_built(conn: &mut Client, built: &BuiltQuery) -> Result<QueryResult> {
         .collect();
     let rows = conn.query(&stmt, &params)?;
 
-    let mut rows_out: Vec<Vec<CellValue>> = Vec::with_capacity(rows.len());
-    for row in &rows {
-        let mut record = Vec::with_capacity(col_count);
-        for i in 0..col_count {
-            let cell: Cell = row.try_get(i)?;
-            record.push(cell.0);
-        }
-        rows_out.push(record);
+    Ok(QueryResult {
+        rows: collect_rows(&rows, col_count)?,
+        columns,
+        rows_affected: None,
+        elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+        truncated: false,
+    })
+}
+
+/// Execute an arbitrary, user-edited SQL statement (no parameters).
+///
+/// Statements that produce a result set (`SELECT`, or `... RETURNING`) come back
+/// with their rows; statements that don't (`INSERT`/`UPDATE`/`DELETE`/DDL) come
+/// back with `rows_affected` set so the UI can report how many rows changed.
+///
+/// This runs whatever SQL the user typed verbatim — callers are expected to gate
+/// destructive statements behind a confirmation before invoking it.
+pub fn run_raw(conn: &mut Client, sql: &str) -> Result<QueryResult> {
+    let start = Instant::now();
+
+    let stmt = conn.prepare(sql)?;
+    let columns = result_columns(&stmt);
+
+    // A statement with no result columns is a command (INSERT/UPDATE/DELETE/DDL);
+    // report the affected-row count instead of an (empty) result set.
+    if columns.is_empty() {
+        let affected = conn.execute(&stmt, &[])?;
+        return Ok(QueryResult {
+            columns,
+            rows: Vec::new(),
+            rows_affected: Some(affected as i64),
+            elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
+            truncated: false,
+        });
     }
 
+    let col_count = columns.len();
+    let rows = conn.query(&stmt, &[])?;
+
     Ok(QueryResult {
+        rows: collect_rows(&rows, col_count)?,
         columns,
-        rows: rows_out,
         rows_affected: None,
         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
         truncated: false,
