@@ -5,9 +5,11 @@ use serde::Serialize;
 use tauri::State;
 
 use pgcore::builder;
+use pgcore::pool;
 use pgcore::query::{self, QueryResult, SortDir};
 use pgcore::spec::QuerySpec;
 
+use crate::commands::blocking;
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -27,7 +29,7 @@ pub struct BuiltSql {
 
 /// Browse one page of a table, optionally sorted by a single column.
 #[tauri::command]
-pub fn browse_table(
+pub async fn browse_table(
     table: String,
     limit: i64,
     offset: i64,
@@ -35,15 +37,19 @@ pub fn browse_table(
     sort_dir: Option<String>,
     state: State<'_, AppState>,
 ) -> AppResult<BrowseResponse> {
-    let mut conn = state.conn()?;
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
 
-    let order_by = sort_column.as_deref().map(|col| {
-        let dir = sort_dir.as_deref().map(SortDir::parse).unwrap_or(SortDir::Asc);
-        (col, dir)
-    });
+        let order_by = sort_column.as_deref().map(|col| {
+            let dir = sort_dir.as_deref().map(SortDir::parse).unwrap_or(SortDir::Asc);
+            (col, dir)
+        });
 
-    let (sql, result) = query::browse_table(&mut conn, &table, order_by, limit, offset)?;
-    Ok(BrowseResponse { sql, result })
+        let (sql, result) = query::browse_table(&mut conn, &table, order_by, limit, offset)?;
+        Ok(BrowseResponse { sql, result })
+    })
+    .await
 }
 
 /// Generate SQL from a visual query spec without executing it. Used to keep the
@@ -60,18 +66,25 @@ pub fn build_sql(spec: QuerySpec) -> AppResult<BuiltSql> {
 /// Build SQL from a visual query spec, execute it, and return the generated SQL
 /// alongside the resulting page of rows.
 #[tauri::command]
-pub fn run_query(spec: QuerySpec, state: State<'_, AppState>) -> AppResult<BrowseResponse> {
-    let mut conn = state.conn()?;
-    let (sql, result) = query::run_select(&mut conn, &spec)?;
-    Ok(BrowseResponse { sql, result })
+pub async fn run_query(spec: QuerySpec, state: State<'_, AppState>) -> AppResult<BrowseResponse> {
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
+        let (sql, result) = query::run_select(&mut conn, &spec)?;
+        Ok(BrowseResponse { sql, result })
+    })
+    .await
 }
 
 /// Execute an arbitrary, user-edited SQL string and return the result. Powers the
 /// "edit and run SQL" flow in the SQL panel. Runs the SQL verbatim, so the
 /// frontend is responsible for confirming destructive statements first.
 #[tauri::command]
-pub fn run_raw_sql(sql: String, state: State<'_, AppState>) -> AppResult<QueryResult> {
-    let mut conn = state.conn()?;
-    let result = query::run_raw(&mut conn, &sql)?;
-    Ok(result)
+pub async fn run_raw_sql(sql: String, state: State<'_, AppState>) -> AppResult<QueryResult> {
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
+        Ok(query::run_raw(&mut conn, &sql)?)
+    })
+    .await
 }

@@ -6,7 +6,7 @@
 
 use std::sync::RwLock;
 
-use pgcore::pool::{self, DbPool, PooledConn};
+use pgcore::pool::DbPool;
 
 use crate::error::{AppError, AppResult};
 
@@ -40,11 +40,12 @@ impl AppState {
         Ok((db.host.clone(), db.port))
     }
 
-    /// Borrow a pooled connection. The connection returns to the pool when the
-    /// returned guard is dropped.
-    pub fn conn(&self) -> AppResult<PooledConn> {
+    /// Clone a handle to the active pool. Cheap (the pool is an `Arc`
+    /// internally), so blocking work can borrow connections on a background
+    /// thread without holding the state lock.
+    pub fn pool(&self) -> AppResult<DbPool> {
         let guard = self.db.read().expect("state lock poisoned");
         let db = guard.as_ref().ok_or(AppError::NoDatabase)?;
-        Ok(pool::get_conn(&db.pool)?)
+        Ok(db.pool.clone())
     }
 }

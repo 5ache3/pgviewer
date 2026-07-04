@@ -6,8 +6,10 @@ use tauri::State;
 
 use pgcore::builder;
 use pgcore::export::{self, ExportFormat};
+use pgcore::pool;
 use pgcore::spec::QuerySpec;
 
+use crate::commands::blocking;
 use crate::error::AppResult;
 use crate::state::AppState;
 
@@ -29,18 +31,22 @@ pub struct ExportResult {
 }
 
 #[tauri::command]
-pub fn export_query(
+pub async fn export_query(
     spec: QuerySpec,
     format: ExportFormat,
     scope: ExportScope,
     dest: String,
     state: State<'_, AppState>,
 ) -> AppResult<ExportResult> {
-    let mut conn = state.conn()?;
-    let query = match scope {
-        ExportScope::Page => builder::build_select(&spec)?,
-        ExportScope::All => builder::build_unbounded(&spec)?,
-    };
-    let row_count = export::export(&mut conn, &query, format, &dest)?;
-    Ok(ExportResult { path: dest, row_count })
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
+        let query = match scope {
+            ExportScope::Page => builder::build_select(&spec)?,
+            ExportScope::All => builder::build_unbounded(&spec)?,
+        };
+        let row_count = export::export(&mut conn, &query, format, &dest)?;
+        Ok(ExportResult { path: dest, row_count })
+    })
+    .await
 }
