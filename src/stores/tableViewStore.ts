@@ -3,6 +3,7 @@ import { create } from "zustand";
 import * as api from "@/ipc/commands";
 import {
   errorMessage,
+  isAppError,
   type Aggregate,
   type CellValue,
   type FilterGroup,
@@ -22,6 +23,17 @@ const DEFAULT_PAGE_SIZE = 500;
 interface SortState {
   column: string;
   dir: "ASC" | "DESC";
+}
+
+/**
+ * A delete that PostgreSQL rejected because other rows reference the selected
+ * ones. Holds the captured PKs so the cascade dialog can show the dependents
+ * and, on confirmation, delete everything.
+ */
+interface DeleteBlocked {
+  table: string;
+  pks: api.PkPredicate[][];
+  message: string;
 }
 
 interface TableViewState {
@@ -51,6 +63,8 @@ interface TableViewState {
    * statement that returns no result set). Cleared whenever a new query runs.
    */
   notice: string | null;
+  /** Set when a delete failed on a FK violation; drives the cascade dialog. */
+  deleteBlocked: DeleteBlocked | null;
 
   selectTable: (table: string) => Promise<void>;
   nextPage: () => Promise<void>;
@@ -84,6 +98,14 @@ interface TableViewState {
    * callers must confirm with the user first.
    */
   deleteRows: (rowIndexes: number[]) => Promise<void>;
+  /**
+   * Delete the rows of the blocked delete plus everything referencing them, in
+   * one transaction. Only callable while `deleteBlocked` is set; the cascade
+   * dialog shows the affected rows and confirms before calling this.
+   */
+  cascadeDelete: () => Promise<void>;
+  /** Dismiss the cascade dialog without deleting anything. */
+  cancelCascadeDelete: () => void;
   /** Re-run the current query (e.g. after a schema change). */
   reload: () => Promise<void>;
   /**
@@ -102,6 +124,7 @@ const blankPage = {
   elapsedMs: 0,
   error: null as string | null,
   notice: null as string | null,
+  deleteBlocked: null as DeleteBlocked | null,
 };
 
 /** Per-table query state, reset whenever the active table changes. */
@@ -288,9 +311,32 @@ export const useTableViewStore = create<TableViewState>((set, get) => ({
       }
       await load(get, set);
     } catch (e) {
+      // Other rows reference the selected ones: hand off to the cascade-delete
+      // dialog instead of surfacing a bare error. All captured PKs are kept —
+      // roots already deleted simply have no dependents left.
+      if (isAppError(e) && e.code === "FK_VIOLATION") {
+        set({ deleteBlocked: { table, pks, message: e.message } });
+        await load(get, set);
+        return;
+      }
       set({ error: errorMessage(e) });
     }
   },
+
+  cascadeDelete: async () => {
+    const blocked = get().deleteBlocked;
+    if (!blocked) return;
+    set({ deleteBlocked: null });
+    try {
+      const n = await api.deleteRowsCascade({ table: blocked.table, pks: blocked.pks });
+      set({ notice: `${n} row(s) deleted` });
+      await load(get, set);
+    } catch (e) {
+      set({ error: errorMessage(e) });
+    }
+  },
+
+  cancelCascadeDelete: () => set({ deleteBlocked: null }),
 
   reload: async () => {
     await load(get, set);

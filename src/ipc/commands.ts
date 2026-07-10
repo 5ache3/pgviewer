@@ -12,6 +12,7 @@ import type {
   ConnectionProfile,
   ConnectRequest,
   DatabaseInfo,
+  DependentReport,
   ExportFormat,
   ExportResult,
   ExportScope,
@@ -150,6 +151,29 @@ export function deleteRow(args: {
   pk: PkPredicate[];
 }): Promise<number> {
   return invoke<number>("delete_row", { ...args });
+}
+
+/**
+ * Report every row (transitively) referencing the rows identified by `pks` —
+ * what a cascade delete would take with it. Read-only.
+ */
+export function dependentRows(args: {
+  table: string;
+  pks: PkPredicate[][];
+}): Promise<DependentReport> {
+  return invoke<DependentReport>("dependent_rows", { ...args });
+}
+
+/**
+ * Delete the identified rows plus everything that references them, in one
+ * transaction. Destructive — show `dependentRows` and confirm first. Returns
+ * total rows deleted.
+ */
+export function deleteRowsCascade(args: {
+  table: string;
+  pks: PkPredicate[][];
+}): Promise<number> {
+  return invoke<number>("delete_rows_cascade", { ...args });
 }
 
 export function addColumn(args: {

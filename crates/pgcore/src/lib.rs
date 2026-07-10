@@ -7,6 +7,7 @@
 
 pub mod bind;
 pub mod builder;
+pub mod cascade;
 pub mod error;
 pub mod export;
 pub mod ident;

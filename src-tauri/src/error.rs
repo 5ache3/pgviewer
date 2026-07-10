@@ -28,6 +28,9 @@ impl AppError {
     fn code(&self) -> &'static str {
         match self {
             AppError::NoDatabase => "NO_DATABASE",
+            // FK violations get their own code so the frontend can offer a
+            // cascade delete instead of a bare error.
+            AppError::Core(e) if e.is_fk_violation() => "FK_VIOLATION",
             AppError::Core(_) => "DATABASE",
             AppError::Io(_) => "IO",
             AppError::Msg(_) => "ERROR",

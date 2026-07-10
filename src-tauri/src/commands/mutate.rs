@@ -3,6 +3,7 @@
 
 use tauri::State;
 
+use pgcore::cascade::{self, DependentReport};
 use pgcore::mutate::{self, PkPredicate};
 use pgcore::pool;
 
@@ -40,6 +41,39 @@ pub async fn delete_row(
     blocking(move || {
         let mut conn = pool::get_conn(&pool)?;
         Ok(mutate::delete_row(&mut conn, &table, &pk)?)
+    })
+    .await
+}
+
+/// Report every row (transitively) referencing the rows identified by `pks` —
+/// what a cascade delete would take with it. Read-only.
+#[tauri::command]
+pub async fn dependent_rows(
+    table: String,
+    pks: Vec<Vec<PkPredicate>>,
+    state: State<'_, AppState>,
+) -> AppResult<DependentReport> {
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
+        Ok(cascade::dependent_rows(&mut conn, &table, &pks)?)
+    })
+    .await
+}
+
+/// Delete the identified rows plus everything that references them, in one
+/// transaction (children first). Destructive — the frontend shows the affected
+/// rows and confirms before calling this. Returns total rows deleted.
+#[tauri::command]
+pub async fn delete_rows_cascade(
+    table: String,
+    pks: Vec<Vec<PkPredicate>>,
+    state: State<'_, AppState>,
+) -> AppResult<u64> {
+    let pool = state.pool()?;
+    blocking(move || {
+        let mut conn = pool::get_conn(&pool)?;
+        Ok(cascade::delete_rows_cascade(&mut conn, &table, &pks)?)
     })
     .await
 }

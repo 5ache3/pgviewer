@@ -48,6 +48,8 @@ pub fn run() {
             commands::query::run_raw_sql,
             commands::mutate::update_cell,
             commands::mutate::delete_row,
+            commands::mutate::dependent_rows,
+            commands::mutate::delete_rows_cascade,
             commands::mutate::add_column,
             commands::mutate::drop_column,
             commands::export::export_query,

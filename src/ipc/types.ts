@@ -222,6 +222,29 @@ export interface BuiltSql {
 }
 
 // ---------------------------------------------------------------------------
+// Dependent rows (cascade delete)
+// ---------------------------------------------------------------------------
+
+/** Rows in one table that reference the rows being deleted, with a preview. */
+export interface DependentGroup {
+  table: string;
+  /** FK path description, e.g. `user_id → users.id`. */
+  via: string;
+  count: number;
+  columns: string[];
+  /** Sample rows (capped by the backend). */
+  rows: CellValue[][];
+}
+
+export interface DependentReport {
+  groups: DependentGroup[];
+  /** Total dependent rows across all groups (the deleted rows excluded). */
+  total: number;
+  /** True when the scan hit its cap — even more rows may be affected. */
+  truncated: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Export, history, saved queries (Phase 4)
 // ---------------------------------------------------------------------------
 

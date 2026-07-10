@@ -16,3 +16,15 @@ pub enum Error {
     #[error("{0}")]
     Msg(String),
 }
+
+impl Error {
+    /// Whether this is a foreign-key constraint violation (SQLSTATE 23503) —
+    /// the UI offers a cascade delete when a row delete fails with this.
+    pub fn is_fk_violation(&self) -> bool {
+        matches!(
+            self,
+            Error::Postgres(e)
+                if e.code() == Some(&postgres::error::SqlState::FOREIGN_KEY_VIOLATION)
+        )
+    }
+}

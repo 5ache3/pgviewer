@@ -12,6 +12,7 @@ import type { CellValue } from "@/ipc/types";
 import { useTableViewStore } from "@/stores/tableViewStore";
 import { useSchemaStore } from "@/stores/schemaStore";
 
+import { CascadeDeleteDialog } from "./CascadeDeleteDialog";
 import { CellView, cellClass, cellToText } from "./CellView";
 import { useCellSelection } from "./useCellSelection";
 
@@ -283,6 +284,9 @@ export function DataGrid() {
           )}
         </div>
       )}
+
+      {/* Opens when a delete was rejected because other rows reference these. */}
+      <CascadeDeleteDialog />
     </div>
   );
 }
