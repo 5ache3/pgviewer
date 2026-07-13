@@ -15,10 +15,25 @@ export function Sidebar() {
   const indexes = useSchemaStore((s) => s.indexes);
   const triggers = useSchemaStore((s) => s.triggers);
   const loading = useSchemaStore((s) => s.loading);
+  const error = useSchemaStore((s) => s.error);
+  const loadSchema = useSchemaStore((s) => s.loadSchema);
 
   return (
     <aside className="flex h-full w-64 shrink-0 flex-col overflow-y-auto border-r border-border bg-surface">
       {loading && <p className="p-3 text-xs text-muted">Loading schema…</p>}
+      {error && (
+        <div className="border-b border-border bg-red-500/10 px-3 py-2">
+          <p className="select-text break-words text-2xs text-red-400">
+            Schema load failed: {error}
+          </p>
+          <button
+            onClick={() => void loadSchema()}
+            className="mt-1 text-2xs text-red-400 underline hover:text-fg"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <Section title="Tables" count={tables.length} defaultOpen>
         <TablesBody names={tables.map((t) => t.name)} />

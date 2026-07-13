@@ -56,17 +56,26 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
 
   loadSchema: async () => {
     set({ loading: true, error: null });
-    try {
-      const [tables, views, indexes, triggers] = await Promise.all([
-        api.listTables(),
-        api.listViews(),
-        api.listIndexes(),
-        api.listTriggers(),
-      ]);
-      set({ tables, views, indexes, triggers, loading: false });
-    } catch (e) {
-      set({ loading: false, error: errorMessage(e) });
-    }
+    // Load the four lists independently so one failing query doesn't blank
+    // the whole tree; surface the first failure so it's never silent.
+    const [tables, views, indexes, triggers] = await Promise.allSettled([
+      api.listTables(),
+      api.listViews(),
+      api.listIndexes(),
+      api.listTriggers(),
+    ]);
+    const results = [tables, views, indexes, triggers];
+    const firstError = results.find(
+      (r): r is PromiseRejectedResult => r.status === "rejected",
+    );
+    set({
+      tables: tables.status === "fulfilled" ? tables.value : [],
+      views: views.status === "fulfilled" ? views.value : [],
+      indexes: indexes.status === "fulfilled" ? indexes.value : [],
+      triggers: triggers.status === "fulfilled" ? triggers.value : [],
+      loading: false,
+      error: firstError ? errorMessage(firstError.reason) : null,
+    });
   },
 
   ensureColumns: async (table) => {
