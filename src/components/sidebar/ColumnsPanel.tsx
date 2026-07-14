@@ -18,6 +18,10 @@ export function ColumnsPanel() {
   const ensureColumns = useSchemaStore((s) => s.ensureColumns);
   const refreshColumns = useSchemaStore((s) => s.refreshColumns);
   const ensureForeignKeys = useSchemaStore((s) => s.ensureForeignKeys);
+  // Subscribe to the cache entries so a global refresh (which clears them)
+  // makes the effect below refetch this table's metadata.
+  const cachedColumns = useSchemaStore((s) => (table ? s.columns[table] : undefined));
+  const cachedFks = useSchemaStore((s) => (table ? s.foreignKeys[table] : undefined));
 
   const [columns, setColumns] = useState<ColumnMeta[]>([]);
   const [fks, setFks] = useState<ForeignKeyMeta[]>([]);
@@ -47,7 +51,7 @@ export function ColumnsPanel() {
     return () => {
       active = false;
     };
-  }, [table, ensureColumns, ensureForeignKeys]);
+  }, [table, cachedColumns, cachedFks, ensureColumns, ensureForeignKeys]);
 
   if (!table) return null;
   const activeTable = table;

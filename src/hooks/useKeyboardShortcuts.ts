@@ -1,7 +1,9 @@
 import { useEffect } from "react";
 
+import { useConnectionStore } from "@/stores/connectionStore";
 import { useUiStore } from "@/stores/uiStore";
 import { FOCUS_FILTER_EVENT, FOCUS_SQL_EVENT, emit } from "@/lib/events";
+import { refreshAll } from "@/lib/refresh";
 
 import { useOpenDatabase } from "./useOpenDatabase";
 
@@ -13,6 +15,7 @@ import { useOpenDatabase } from "./useOpenDatabase";
  *   Cmd/Ctrl + K — command palette
  *   Cmd/Ctrl + L — focus the SQL editor
  *   Cmd/Ctrl + F — focus the filter builder
+ *   Cmd/Ctrl + R — refresh schema & data
  */
 export function useKeyboardShortcuts() {
   const openDatabase = useOpenDatabase();
@@ -53,6 +56,11 @@ export function useKeyboardShortcuts() {
         case "f":
           e.preventDefault();
           emit(FOCUS_FILTER_EVENT);
+          break;
+        case "r":
+          // Swallow the webview's own reload even when not connected.
+          e.preventDefault();
+          if (useConnectionStore.getState().status === "open") void refreshAll();
           break;
       }
     };

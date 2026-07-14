@@ -5,6 +5,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useSchemaStore } from "@/stores/schemaStore";
 import { useTableViewStore } from "@/stores/tableViewStore";
 import { FOCUS_FILTER_EVENT, FOCUS_SQL_EVENT, emit } from "@/lib/events";
+import { refreshAll } from "@/lib/refresh";
 import { useOpenDatabase } from "@/hooks/useOpenDatabase";
 
 interface Command {
@@ -39,6 +40,7 @@ export function CommandPalette() {
   const commands = useMemo<Command[]>(() => {
     const actions: Command[] = [
       { id: "connect", label: "Connect to database…", hint: "⌘O", run: () => void openDatabase() },
+      { id: "refresh", label: "Refresh schema & data", hint: "⌘R", run: () => void refreshAll() },
       { id: "focus-sql", label: "Focus SQL editor", hint: "⌘L", run: () => emit(FOCUS_SQL_EVENT) },
       { id: "focus-filter", label: "Add filter", hint: "⌘F", run: () => emit(FOCUS_FILTER_EVENT) },
       { id: "toggle-left", label: "Toggle sidebar", hint: "⌘B", run: toggleLeft },

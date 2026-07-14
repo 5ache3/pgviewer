@@ -8,6 +8,7 @@ import { useUiStore } from "@/stores/uiStore";
 import { useOpenDatabase } from "@/hooks/useOpenDatabase";
 import { Button } from "@/components/common/Button";
 import { cn } from "@/lib/cn";
+import { refreshAll } from "@/lib/refresh";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { ColumnsPanel } from "@/components/sidebar/ColumnsPanel";
 import { DataGrid } from "@/components/grid/DataGrid";
@@ -78,6 +79,7 @@ export function AppShell() {
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {isOpen && <RefreshButton />}
           <ThemeToggle theme={theme} onClick={toggleTheme} />
           <Button onClick={() => openDatabase()}>{isOpen ? "Connect…" : "Connect"}</Button>
           {isOpen && (
@@ -224,6 +226,50 @@ function PanelToggle({
           x2={side === "left" ? 6 : 10}
           y2="13.5"
           stroke="currentColor"
+        />
+      </svg>
+    </button>
+  );
+}
+
+/** Refetches schema, row counts and the current page from the live server,
+ * without reconnecting. For picking up changes made by other clients. */
+function RefreshButton() {
+  const schemaLoading = useSchemaStore((s) => s.loading);
+  const gridLoading = useTableViewStore((s) => s.loading);
+  const busy = schemaLoading || gridLoading;
+  return (
+    <button
+      onClick={() => void refreshAll()}
+      disabled={busy}
+      title="Refresh schema & data (⌘/Ctrl+R)"
+      aria-label="Refresh schema & data"
+      className={cn(
+        "flex h-7 w-7 items-center justify-center rounded border border-border text-muted",
+        "hover:bg-surface-2 hover:text-fg disabled:opacity-60",
+      )}
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 24 24"
+        fill="none"
+        aria-hidden
+        className={busy ? "animate-spin" : undefined}
+      >
+        <path
+          d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d="M21 3v5h-6"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
         />
       </svg>
     </button>

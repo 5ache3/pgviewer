@@ -26,6 +26,11 @@ interface SchemaState {
 
   /** Load the four object lists. Schema discovery is cheap and runs on open. */
   loadSchema: () => Promise<void>;
+  /**
+   * Drop every cached row count and column/FK list, then reload the schema.
+   * Used when the database was changed by another client and the UI is stale.
+   */
+  refresh: () => Promise<void>;
   ensureColumns: (table: string) => Promise<ColumnMeta[]>;
   /** Refetch a table's columns, bypassing the cache (after a DDL change). */
   refreshColumns: (table: string) => Promise<ColumnMeta[]>;
@@ -76,6 +81,11 @@ export const useSchemaStore = create<SchemaState>((set, get) => ({
       loading: false,
       error: firstError ? errorMessage(firstError.reason) : null,
     });
+  },
+
+  refresh: async () => {
+    set({ columns: {}, foreignKeys: {}, rowCounts: {} });
+    await get().loadSchema();
   },
 
   ensureColumns: async (table) => {
